@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json;
+﻿using Discord.WebSocket;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -44,7 +45,7 @@ namespace DiscordGo.Classes
             }
         }
 
-        public void AddNewGuild(Discord.IGuild guild)
+        public void AddNewGuild(SocketGuild guild)
         {
             var guilds = Guilds;
 

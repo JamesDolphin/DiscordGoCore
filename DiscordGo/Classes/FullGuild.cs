@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Discord.WebSocket;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -6,7 +7,7 @@ namespace DiscordGo.Classes
 {
     public class FullGuild
     {
-        public Discord.IGuild Guild { get; set; }
+        public SocketGuild Guild { get; set; }
 
         public Discord.IRole NotificationRole { get; set; }
         public Discord.IChannel AdminChannel { get; set; }
@@ -19,7 +20,7 @@ namespace DiscordGo.Classes
 
         public List<CsMatch> Matches { get; set; } = new List<CsMatch>();
 
-        public FullGuild(Discord.IGuild guild)
+        public FullGuild(SocketGuild guild)
         {
             Guild = guild;
         }
