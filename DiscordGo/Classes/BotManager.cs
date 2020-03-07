@@ -12,7 +12,11 @@ namespace DiscordGo.Classes
     {
         private List<GuildManager> GuildManagers { get; set; } = new List<GuildManager>();
 
-        private Dictionary<string, Action<CommandRequest>> Commands = new Dictionary<string, Action<CommandRequest>>();
+        private readonly Dictionary<string, Action<CommandRequest>> Commands = new Dictionary<string, Action<CommandRequest>>();
+
+        private OverwritePermissions AdminPermissions { get; set; }
+
+        private OverwritePermissions EveryonePermissions { get; set; }
 
         private char Prefix { get; set; }
 
@@ -25,6 +29,15 @@ namespace DiscordGo.Classes
 
             Prefix = prefix;
             Commands = GenerateCommands();
+
+            GenerateRolePermissions();
+        }
+
+        internal void GenerateRolePermissions()
+        {
+            AdminPermissions = new OverwritePermissions(viewChannel: PermValue.Allow);
+
+            EveryonePermissions = new OverwritePermissions(viewChannel: PermValue.Deny);
         }
 
         private Dictionary<string, Action<CommandRequest>> GenerateCommands()
@@ -69,8 +82,6 @@ namespace DiscordGo.Classes
                  {
                     CommandConstants.AddServer, async (commandRequest) =>
                     {
-                        await ValidateAdminChannel(commandRequest);
-
                         if(commandRequest.NeedHelp)
                         {
                            var eb = new EmbedBuilder
@@ -102,18 +113,11 @@ namespace DiscordGo.Classes
                             await ValidateBotCategoryAsync(commandRequest);
                             await ValidateAdminChannel(commandRequest);
 
-                            if(commandRequest.Guild.Channels.FirstOrDefault(x => x.Name == ChannelNames.Admin) == null)
-                            {
-                                var category = commandRequest.Guild.CategoryChannels.FirstOrDefault(x => x.Name == ChannelNames.Category);
-
-                                await commandRequest.Guild.CreateTextChannelAsync(ChannelNames.Admin, func: x => {x.CategoryId = category.Id; });
-                            }
-
                             if(commandRequest.Message.Channel.Name != ChannelNames.Admin)
                             {
-                                var adminChannel = commandRequest.Guild.Channels.FirstOrDefault(x => x.Name == ChannelNames.Admin);
+                                var adminChannel = GetAdminChannelAsync(commandRequest.Guild) as IChannel;
 
-                                await commandRequest.Message.Channel.SendMessageAsync($"That command must be used in {MentionUtils.MentionChannel(adminChannel.Id)}");
+                               await commandRequest.Message.Channel.SendMessageAsync($"That command must be used in {MentionUtils.MentionChannel(adminChannel.Id)}");
                             }
                         }
                     }
@@ -142,16 +146,9 @@ namespace DiscordGo.Classes
             {
                 if (GuildManagers.FirstOrDefault(x => x.Guild.Id == guild.Id) == null)
                 {
-                    Discord.Rest.RestRole role;
+                    await GetAdminRoleAsync(guild);
 
-                    if (guild.Roles.FirstOrDefault(x => x.Name == "DiscordGo") == null)
-                    {
-                        role = await guild.CreateRoleAsync("DiscordGo", color: Color.Teal);
-
-                        await guild.CurrentUser.AddRoleAsync(role);
-
-                        await guild.CreateRoleAsync("DiscordGoViewer", color: Color.DarkTeal);
-                    }
+                    await GetViewerRoleAsync(guild);
 
                     GuildManagers.Add(new GuildManager(guild));
                 }
@@ -161,34 +158,6 @@ namespace DiscordGo.Classes
                 Console.WriteLine($"EXCEPTION: {e}");
                 return;
             }
-        }
-
-        internal async Task ValidateBotCategoryAsync(CommandRequest commandRequest)
-        {
-            if (commandRequest.Guild.CategoryChannels.FirstOrDefault(x => x.Name == ChannelNames.Category) == null)
-            {
-                var category = await commandRequest.Guild.CreateCategoryChannelAsync(ChannelNames.Category, func: x => { x.Position = 0; });
-
-                await category.ModifyAsync(func: x => { x.Position = 0; });
-            }
-
-            return;
-        }
-
-        internal async Task ValidateAdminChannel(CommandRequest commandRequest)
-        {
-            if (commandRequest.Guild.Channels.FirstOrDefault(x => x.Name == ChannelNames.Admin) == null)
-            {
-                var category = commandRequest.Guild.CategoryChannels.FirstOrDefault(x => x.Name == ChannelNames.Category);
-
-                var adminChannel = await commandRequest.Guild.CreateTextChannelAsync(ChannelNames.Admin, func: x => { x.CategoryId = category.Id; });
-
-                var role = commandRequest.Guild.Roles.First(x => x.Name == "DiscordGo");
-
-                var adminPermissions = new ChannelPermissions(false, false, true, true, true, false, false, false, false, true, false, true, true, true, false, false, false, true, false, false, false);
-            }
-
-            return;
         }
 
         internal async Task MessageReceivedAsync(SocketMessage message)
@@ -219,5 +188,122 @@ namespace DiscordGo.Classes
 
             return;
         }
+
+        #region Helpers
+
+        #region Validators
+
+        internal async Task ValidateBotCategoryAsync(CommandRequest commandRequest)
+        {
+            await GetBaseCategoryAsync(commandRequest.Guild);
+
+            return;
+        }
+
+        internal async Task ValidateAdminChannel(CommandRequest commandRequest)
+        {
+            if (commandRequest.Guild.Channels.FirstOrDefault(x => x.Name == ChannelNames.Admin) == null)
+            {
+                var adminRole = await GetAdminRoleAsync(commandRequest.Guild) as IRole;
+
+                var everyoneRole = GetEveryoneRole(commandRequest.Guild) as IRole;
+
+                var category = await GetBaseCategoryAsync(commandRequest.Guild);
+
+                var adminChannel = await commandRequest.Guild.CreateTextChannelAsync(ChannelNames.Admin, func: x => { x.CategoryId = category.Id; });
+
+                await adminChannel.AddPermissionOverwriteAsync(adminRole, AdminPermissions);
+
+                await adminChannel.AddPermissionOverwriteAsync((adminRole as IRole), EveryonePermissions);
+            }
+
+            return;
+        }
+
+        #endregion Validators
+
+        #region Admin Role
+
+        public async Task<SocketRole> GetAdminRoleAsync(SocketGuild guild)
+        {
+            var adminRole = guild.Roles.FirstOrDefault(x => x.Name == "DiscordGo");
+
+            return adminRole ?? await GenerateAdminRoleAsync(guild);
+        }
+
+        private async Task<SocketRole> GenerateAdminRoleAsync(SocketGuild guild)
+        {
+            var adminRole = await guild.CreateRoleAsync("DiscordGo", color: Color.Teal);
+
+            return guild.Roles.FirstOrDefault(x => x.Name == "DiscordGo");
+        }
+
+        #endregion Admin Role
+
+        #region Viewer Role
+
+        private async Task<SocketRole> GetViewerRoleAsync(SocketGuild guild)
+        {
+            var viewerRole = guild.Roles.FirstOrDefault(x => x.Name == "DiscordGoViewer");
+
+            return viewerRole ?? await GenerateViewerRoleAsync(guild);
+        }
+
+        private async Task<SocketRole> GenerateViewerRoleAsync(SocketGuild guild)
+        {
+            var vierwerRole = await guild.CreateRoleAsync("DiscordGoViewer", color: Color.DarkTeal);
+
+            return guild.Roles.FirstOrDefault(x => x.Name == "DiscordViewer");
+        }
+
+        #endregion Viewer Role
+
+        #region Everyone Role
+
+        private SocketRole GetEveryoneRole(SocketGuild guild)
+        {
+            return guild.EveryoneRole;
+        }
+
+        #endregion Everyone Role
+
+        #region Base Category
+
+        private async Task<SocketCategoryChannel> GetBaseCategoryAsync(SocketGuild guild)
+        {
+            var baseCategory = guild.CategoryChannels.FirstOrDefault(x => x.Name == ChannelNames.Category);
+
+            return baseCategory ?? await GenerateBaseCategory(guild);
+        }
+
+        private async Task<SocketCategoryChannel> GenerateBaseCategory(SocketGuild guild)
+        {
+            await guild.CreateCategoryChannelAsync(ChannelNames.Category, func: x => { x.Position = -1; });
+
+            return guild.CategoryChannels.FirstOrDefault(x => x.Name == ChannelNames.Category);
+        }
+
+        #endregion Base Category
+
+        #region Admin Channel
+
+        private async Task<SocketChannel> GetAdminChannelAsync(SocketGuild guild)
+        {
+            var adminChannel = guild.TextChannels.FirstOrDefault(x => x.Name == ChannelNames.Admin);
+
+            return adminChannel ?? await GenerateAdminChannelAsync(guild);
+        }
+
+        private async Task<SocketChannel> GenerateAdminChannelAsync(SocketGuild guild)
+        {
+            var category = await GetBaseCategoryAsync(guild);
+            var adminChannel = await guild.CreateTextChannelAsync(ChannelNames.Admin, func: x => { x.CategoryId = category.Id; });
+
+            return await GetAdminChannelAsync(guild);
+        }
+
+        #endregion Admin Channel
+
+        #endregion Helpers
     }
 }
