@@ -14,8 +14,6 @@ namespace DiscordGo.Classes
 
         public int SeriesScore { get; set; }
 
-        public List<CsPlayer> Players { get; set; } = new List<CsPlayer>();
-
         public CsTeam()
         {
         }

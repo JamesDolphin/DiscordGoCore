@@ -1,9 +1,11 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Discord;
 using Discord.WebSocket;
 using DiscordGo.Classes;
+using DiscordGo.Constants;
 using Newtonsoft.Json;
 
 namespace DiscordGo
@@ -14,7 +16,7 @@ namespace DiscordGo
 
         private readonly DiscordSocketClient _client;
 
-        public GuildManager GuildManager { get; set; }
+        public BotManager GuildManager { get; set; }
 
         private static void Main(string[] args)
         {
@@ -30,21 +32,23 @@ namespace DiscordGo
                     string json = reader.ReadToEnd();
                     Config = JsonConvert.DeserializeObject<Config>(json);
                 }
+
+                _client = new DiscordSocketClient();
+
+                _client.Ready += ReadyAsync;
+                _client.MessageReceived += MessageReceivedAsync;
+                _client.JoinedGuild += JoinedNewGuildAsync;
             }
-
-            // It is recommended to Dispose of a client when you are finished
-            // using it, at the end of your app's lifetime.
-            _client = new DiscordSocketClient();
-
-            _client.Log += LogAsync;
-            _client.Ready += ReadyAsync;
-            _client.MessageReceived += MessageReceivedAsync;
-            _client.JoinedGuild += JoinedNewGuildAsync;
+            else
+            {
+                Console.WriteLine("NO CONFIG FILE");
+            }
         }
 
         private async Task JoinedNewGuildAsync(SocketGuild guild)
         {
-            //await GuildManager.AddNewGuild(guild);
+            await GuildManager.AddNewGuildAsync(guild);
+
             return;
         }
 
@@ -54,28 +58,32 @@ namespace DiscordGo
             await _client.LoginAsync(TokenType.Bot, Config.DcToken);
             await _client.StartAsync();
 
+            await _client.SetGameAsync($"{Config.Prefix}{CommandConstants.Help}");
+
             // Block the program until it is closed.
             await Task.Delay(-1);
-        }
-
-        private Task LogAsync(LogMessage log)
-        {
-            Console.WriteLine(log.ToString());
-            return Task.CompletedTask;
         }
 
         private Task ReadyAsync()
         {
             Console.WriteLine($"{_client.CurrentUser} is connected!");
 
-            GuildManager = new GuildManager(_client.Guilds);
+            GuildManager = new BotManager(_client.Guilds, Config.Prefix);
 
             return Task.CompletedTask;
         }
 
         private async Task MessageReceivedAsync(SocketMessage message)
         {
-            char messagePrefix = message.Content.ToCharArray()[0];
+            if (message.Author.IsBot)
+            {
+                return;
+            }
+
+            if ((message as IMessage).Type == MessageType.GuildMemberJoin)
+            {
+                return;
+            }
 
             // The bot should never respond to itself.
             if (message.Author.Id == _client.CurrentUser.Id)
@@ -84,12 +92,28 @@ namespace DiscordGo
             }
 
             // Messages that do not start with the Config.Prefix should be ignored
-            if (messagePrefix != Config.Prefix)
+            if (message.Content.ToCharArray()[0] != Config.Prefix)
             {
                 return;
             }
 
-            GuildManager.MessageReceived(message);
+            var user = (message.Channel as SocketGuildChannel).Guild.Users.FirstOrDefault(x => x.Id == message.Author.Id);
+
+            if ((message.Channel as SocketGuildChannel).Guild.Roles.FirstOrDefault(x => x.Name == "DiscordGo") == null)
+            {
+                await (message.Channel as SocketGuildChannel).Guild.CreateRoleAsync("DiscordGo", color: Color.Teal);
+            }
+
+            if (user.Roles.FirstOrDefault(x => x.Name == "DiscordGo") == null)
+            {
+                await message.Channel.SendMessageAsync("You need the DiscordGo role before I can help you.");
+            }
+            else
+            {
+                await GuildManager.MessageReceivedAsync(message);
+            }
+
+            return;
         }
     }
 }

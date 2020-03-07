@@ -11,5 +11,7 @@ namespace DiscordGo.Constants
         public const string SetScoresChannel = "SetScoresChannel";
         public const string SetMatchCompleteChannel = "SetMatchCompleteChannel";
         public const string ListChannels = "ListChannels";
+        public const string Help = "Help";
+        public const string AddServer = "AddServer";
     }
 }
