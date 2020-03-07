@@ -23,8 +23,14 @@ namespace DiscordGo
 
         public Program()
         {
-            GuildManager = new GuildManager("./data.json");
-            Config = JsonConvert.DeserializeObject<Config>(File.ReadAllText("./config.json"));
+            if (File.Exists("./config.json"))
+            {
+                using (StreamReader reader = new StreamReader("./config.json"))
+                {
+                    string json = reader.ReadToEnd();
+                    Config = JsonConvert.DeserializeObject<Config>(json);
+                }
+            }
 
             // It is recommended to Dispose of a client when you are finished
             // using it, at the end of your app's lifetime.
@@ -38,7 +44,8 @@ namespace DiscordGo
 
         private async Task JoinedNewGuildAsync(SocketGuild guild)
         {
-            GuildManager.AddNewGuild(guild);
+            //await GuildManager.AddNewGuild(guild);
+            return;
         }
 
         public async Task MainAsync()
@@ -61,17 +68,28 @@ namespace DiscordGo
         {
             Console.WriteLine($"{_client.CurrentUser} is connected!");
 
+            GuildManager = new GuildManager(_client.Guilds);
+
             return Task.CompletedTask;
         }
 
         private async Task MessageReceivedAsync(SocketMessage message)
         {
+            char messagePrefix = message.Content.ToCharArray()[0];
+
             // The bot should never respond to itself.
             if (message.Author.Id == _client.CurrentUser.Id)
+            {
                 return;
+            }
 
-            if (message.Content == "!ping")
-                await message.Channel.SendMessageAsync("pong!");
+            // Messages that do not start with the Config.Prefix should be ignored
+            if (messagePrefix != Config.Prefix)
+            {
+                return;
+            }
+
+            GuildManager.MessageReceived(message);
         }
     }
 }

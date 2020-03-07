@@ -1,58 +1,68 @@
-﻿using Discord.WebSocket;
-using Newtonsoft.Json;
+﻿using Discord;
+using Discord.WebSocket;
+using DiscordGo.Constants;
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text;
+using System.Linq;
 
 namespace DiscordGo.Classes
 {
     public class GuildManager
     {
-        private List<FullGuild> _guilds { get; set; } = new List<FullGuild>();
+        private List<SocketGuild> Guilds { get; set; } = new List<SocketGuild>();
 
-        private List<FullGuild> Guilds
+        private Dictionary<string, Action<CommandRequest>> Commands = new Dictionary<string, Action<CommandRequest>>();
+
+        public GuildManager(IReadOnlyCollection<SocketGuild> guilds)
         {
-            get { return _guilds; }
-            set
-            {
-                _guilds = value;
-                SaveGuilds();
-            }
+            Guilds = guilds.ToList();
+            Commands = GenerateCommands();
         }
 
-        private string Path { get; set; }
-
-        public GuildManager(string path)
+        private Dictionary<string, Action<CommandRequest>> GenerateCommands()
         {
-            Path = path;
-        }
-
-        private void SaveGuilds()
-        {
-            try
+            return new Dictionary<string, Action<CommandRequest>>()
             {
-                using (StreamWriter file = File.CreateText(Path))
                 {
-                    JsonSerializer serializer = new JsonSerializer();
-                    //serialize object directly into file stream
-                    serializer.Serialize(file, JsonConvert.SerializeObject(Guilds));
+                    CommandConstants.SetAdminChannel, async (commandRequest) =>
+                    {
+                        if(commandRequest.Guild.CategoryChannels.FirstOrDefault(x => x.Name == "DiscordGo") == null)
+                        {
+                            var category = await commandRequest.Guild.CreateCategoryChannelAsync("DiscordGo", func: x => {x.Position = 0; });
+
+                            await category.ModifyAsync(func: x=>{x.Position  = 0; });
+                        }
+
+                        if(commandRequest.Guild.Channels.FirstOrDefault(x => x.Name == "AdminChannel") == null)
+                        {
+                            var category = commandRequest.Guild.CategoryChannels.FirstOrDefault(x => x.Name == "DiscordGo");
+
+                            await commandRequest.Guild.CreateTextChannelAsync("name", func: x => {x.CategoryId = category.Id; });
+                        }
+                    }
                 }
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"EXCEPTION: {e}");
-            }
+            };
         }
 
-        public void AddNewGuild(SocketGuild guild)
+        internal void MessageReceived(SocketMessage message)
         {
-            var guilds = Guilds;
+            var channel = message.Channel as SocketGuildChannel;
 
-            guilds.Add(new FullGuild(guild));
-            Guilds = guilds;
+            var arguments = message.Content.Substring(1).Split(' ');
 
-            Console.WriteLine(Guilds.Count);
+            var myGuild = Guilds.FirstOrDefault(x => x.Id == channel.Guild.Id);
+
+            var commandRequest = new CommandRequest()
+            {
+                Guild = channel.Guild,
+                Message = message,
+                Arguments = arguments
+            };
+
+            if (Commands.ContainsKey(arguments[0]))
+            {
+                Commands[arguments[0]](commandRequest);
+            }
         }
     }
 }
