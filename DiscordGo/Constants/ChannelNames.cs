@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace DiscordGo.Constants
+﻿namespace DiscordGo.Constants
 {
     public static class ChannelNames
     {
