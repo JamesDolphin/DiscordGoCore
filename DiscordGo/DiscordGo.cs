@@ -18,7 +18,7 @@ namespace DiscordGo
 
         public BotManager GuildManager { get; set; }
 
-        private static void Main(string[] args)
+        private static void Main()
         {
             new Program().MainAsync().GetAwaiter().GetResult();
         }
@@ -68,7 +68,7 @@ namespace DiscordGo
         {
             Console.WriteLine($"{_client.CurrentUser} is connected!");
 
-            GuildManager = new BotManager(_client.Guilds, Config.Prefix);
+            GuildManager = new BotManager(_client.Guilds, Config);
 
             return Task.CompletedTask;
         }

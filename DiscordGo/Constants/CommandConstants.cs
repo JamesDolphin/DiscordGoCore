@@ -9,5 +9,6 @@
         public const string ListChannels = "ListChannels";
         public const string Help = "Help";
         public const string AddServer = "AddServer";
+        public const string ServerList = "ServerList";
     }
 }
