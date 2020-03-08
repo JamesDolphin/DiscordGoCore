@@ -1,5 +1,6 @@
 ﻿using Discord;
 using Discord.WebSocket;
+using DiscordGo.Classes.Events;
 using DiscordGo.Constants;
 using System;
 using System.Collections.Generic;
@@ -18,16 +19,16 @@ namespace DiscordGo.Classes
 
         private OverwritePermissions EveryonePermissions { get; set; }
 
-        private char Prefix { get; set; }
+        private Config Config { get; set; }
 
-        public BotManager(IReadOnlyCollection<SocketGuild> guilds, char prefix)
+        public BotManager(IReadOnlyCollection<SocketGuild> guilds, Config config)
         {
             foreach (var guild in guilds)
             {
                 GuildManagers.Add(new GuildManager(guild));
             }
 
-            Prefix = prefix;
+            Config = config;
             Commands = GenerateCommands();
 
             GenerateRolePermissions();
@@ -45,41 +46,6 @@ namespace DiscordGo.Classes
             return new Dictionary<string, Action<CommandRequest>>()
             {
                 {
-                    CommandConstants.SetAdminChannel, async (commandRequest) =>
-                    {
-                        if(commandRequest.NeedHelp)
-                        {
-                           var eb = new EmbedBuilder
-                           {
-                               Title = $"{CommandConstants.SetAdminChannel}",
-
-                               ThumbnailUrl = "https://cdn.discordapp.com/attachments/546946476836782090/546955027210829825/no_backround.png",
-
-                               Color = Color.Teal
-                           };
-
-                            var fieldBuilder = new EmbedFieldBuilder
-                            {
-                                Name = "Creates DiscordGo admin channel where all commands should be initiated from",
-
-                                Value = "field"
-                            };
-
-                            eb.AddField("Usage", fieldBuilder.Build());
-
-                            eb.WithFooter("Use command \"help\" to list all available commands");
-
-                            eb.Description = $"\"{CommandConstants.SetAdminChannel}\"";
-
-                            await commandRequest.Message.Channel.SendMessageAsync(string.Empty, false, eb.Build());
-                        }
-                        else
-                        {
-                            await ValidateBotCategoryAsync(commandRequest);
-                        }
-                    }
-                },
-                 {
                     CommandConstants.AddServer, async (commandRequest) =>
                     {
                         if(commandRequest.NeedHelp)
@@ -102,9 +68,167 @@ namespace DiscordGo.Classes
 
                             eb.AddField("Usage", fieldBuilder.Build());
 
-                            eb.WithFooter("Use command \"help\" to list all available commands");
+                            eb.WithFooter($"Use command \"{Config.Prefix}{CommandConstants.Help}\" to list all available commands");
 
-                            eb.Description = $"\"{CommandConstants.SetAdminChannel}\"";
+                            eb.Description = $"{Config.Prefix}{CommandConstants.AddServer}";
+
+                            await commandRequest.Message.Channel.SendMessageAsync(string.Empty, false, eb.Build());
+                        }
+                        else
+                        {
+                            await GetChannelAsync(commandRequest.Guild, ChannelNames.Admin);
+                            await commandRequest.Message.DeleteAsync();
+
+                            if(commandRequest.Message.Channel.Name != ChannelNames.Admin)
+                            {
+                                var adminChannel = await GetChannelAsync(commandRequest.Guild, ChannelNames.Admin) as IChannel;
+
+                                await commandRequest.Message.Channel.SendMessageAsync($"That command must be used in {MentionUtils.MentionChannel(adminChannel.Id)}");
+                            }
+                            else
+                            {
+                                var guild = GuildManagers.FirstOrDefault(x => x.Guild.Id == commandRequest.Guild.Id);
+
+                                var server = guild.Servers.FirstOrDefault(x => x.IpAddress == commandRequest.Arguments[1]);
+
+                                if(server != null)
+                                {
+                                    await commandRequest.Message.Channel.SendMessageAsync($"That server (ID: {server.ID}) is already being followed. Use {Config.Prefix}{CommandConstants.ServerList} to find it");
+                                }
+                                else
+                                {
+                                    bool error = false;
+
+                                    var ipPort = commandRequest.Arguments[1].Split(':');
+
+                                    if(ipPort.Length != 2)
+                                    {
+                                        error = true;
+                                    }
+
+                                    if(commandRequest.Arguments.Length != 3)
+                                    {
+                                        error = true;
+                                    }
+
+                                    if(!error)
+                                    {
+                                        var ip = ipPort[0];
+                                        var port = Convert.ToUInt16(ipPort[1]);
+
+                                        server = new CsServer(ip, port, commandRequest.Arguments[2], Config, guild, guild.ServerId);
+
+                                        await server.InitializeRconAsync();
+
+                                        if (server.Authed)
+                                        {
+                                            var eb = new EmbedBuilder
+                                            {
+                                                Title = $"Server Added ✅",
+
+                                                ThumbnailUrl = "https://cdn.discordapp.com/attachments/546946476836782090/546955027210829825/no_backround.png",
+
+                                                Color = Color.Teal
+                                            };
+
+                                            var idField = new EmbedFieldBuilder
+                                            {
+                                                Name = $"{server.ID}",
+                                                Value = "field"
+                                            };
+
+                                            var ipField = new EmbedFieldBuilder
+                                            {
+                                                Name = $"{ip}:{port}",
+
+                                                Value = "field"
+                                            };
+
+                                            eb.AddField("ID", idField.Build());
+
+                                            eb.AddField("IP Address", ipField.Build());
+
+                                            eb.WithFooter($"Use command \"{Config.Prefix}{CommandConstants.Help}\" to list all available commands");
+
+                                            await commandRequest.Message.Channel.SendMessageAsync(string.Empty, false, eb.Build());
+
+                                            server.ChatMessageEventArgs += CsServerChatMessageAsync;
+
+                                            server.MatchStartEventArgs += CsServerMatchLiveAsync;
+
+                                            server.TacMessageEventArgs += CsServerTacPauseAsync;
+
+                                            server.TechMessageEventArgs += CsServerTechPauseAsync;
+
+                                            server.MatchSwapSidesEventArgs += CsServerSwapSidesAsync;
+
+                                            server.UnpauseMessageEventArgs += CsServerUnpauseAsync;
+
+                                            server.ScoreUpdateEventsArgs += CsServerScoreUpdateAsycAsync;
+
+                                            guild.Servers.Add(server);
+
+                                            guild.ServerId ++;
+                                        }
+                                        else
+                                        {
+                                            var eb = new EmbedBuilder
+                                            {
+                                                Title = $"❌ FAILED TO AUTHENTICATE ❌",
+
+                                                ThumbnailUrl = "https://cdn.discordapp.com/attachments/546946476836782090/546955027210829825/no_backround.png",
+
+                                                Color = Color.Teal
+                                            };
+
+                                            var reasonField = new EmbedFieldBuilder
+                                            {
+                                                Name = $"Failed to authenticate, make sure rcon password is correct",
+                                                Value = "field"
+                                            };
+
+                                            eb.AddField("Reason", reasonField.Build());
+
+                                            eb.WithFooter($"Use command \"{Config.Prefix}{CommandConstants.Help}\" to list all available commands");
+
+                                            await commandRequest.Message.Channel.SendMessageAsync(string.Empty, false, eb.Build());
+                                        }
+                                    }
+                                    else
+                                    {
+                                        await commandRequest.Message.Channel.SendMessageAsync($"Command syntax is incorrect. Use {Config.Prefix}{CommandConstants.AddServer} 123.45.678:12345 rconPassword");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                 {
+                    CommandConstants.ServerList, async (commandRequest) =>
+                    {
+                        if(commandRequest.NeedHelp)
+                        {
+                           var eb = new EmbedBuilder
+                           {
+                               Title = $"{CommandConstants.AddServer}",
+
+                               ThumbnailUrl = "https://cdn.discordapp.com/attachments/546946476836782090/546955027210829825/no_backround.png",
+
+                               Color = Color.Teal
+                           };
+
+                            var fieldBuilder = new EmbedFieldBuilder
+                            {
+                                Name = "Lists all servers being tracked on this server",
+
+                                Value = "field"
+                            };
+
+                            eb.AddField("Usage", fieldBuilder.Build());
+
+                            eb.WithFooter($"Use command \"{Config.Prefix}{CommandConstants.Help}\" to list all available commands");
+
+                            eb.Description = $"{Config.Prefix}{CommandConstants.ServerList}";
 
                             await commandRequest.Message.Channel.SendMessageAsync(string.Empty, false, eb.Build());
                         }
@@ -115,9 +239,24 @@ namespace DiscordGo.Classes
 
                             if(commandRequest.Message.Channel.Name != ChannelNames.Admin)
                             {
-                                var adminChannel = GetAdminChannelAsync(commandRequest.Guild) as IChannel;
+                                var adminChannel = await GetChannelAsync(commandRequest.Guild, ChannelNames.Admin) as IChannel;
 
                                await commandRequest.Message.Channel.SendMessageAsync($"That command must be used in {MentionUtils.MentionChannel(adminChannel.Id)}");
+                            }
+                            else
+                            {
+                                var serverList = string.Empty;
+
+                                var guild = GuildManagers.FirstOrDefault(x => x.Guild.Id == commandRequest.Guild.Id);
+
+                                foreach(var server in guild.Servers)
+                                {
+                                    serverList = $"{serverList} [{server.ID}] {server.IpAddress}\n";
+                                }
+
+                                serverList = $"```\n{serverList}\n```";
+
+                                await commandRequest.Message.Channel.SendMessageAsync(serverList);
                             }
                         }
                     }
@@ -132,7 +271,7 @@ namespace DiscordGo.Classes
                             commandList = $"{commandList} {key}\n";
                         }
 
-                        commandList = $"```\n{commandList}\n CommandName Help for more information```";
+                        commandList = $"```\n{commandList}\n {Config.Prefix}CommandName Help for more information```";
 
                         await commandRequest.Message.Channel.SendMessageAsync(commandList);
                     }
@@ -140,15 +279,86 @@ namespace DiscordGo.Classes
             };
         }
 
+        #region Match Messages
+
+        private async void CsServerScoreUpdateAsycAsync(object sender, ScoreUpdateEventsArgs e)
+        {
+            var serverList = string.Empty;
+
+            var scoresChannel = await GetChannelAsync(e.GuildManager.Guild, ChannelNames.Scores) as ISocketMessageChannel;
+
+            foreach (var server in e.GuildManager.Servers)
+            {
+                serverList = $"{serverList} ID: [{server.ID}] CT: {server.Match.CTName} ({server.Match.CTScore}) vs T: {server.Match.TName} ({server.Match.TScore})\n";
+            }
+
+            serverList = $"```cs\n{serverList}\n```";
+
+            var oldMessage = e.GuildManager.ScoresMessage;
+
+            try
+            {
+                await oldMessage.ModifyAsync(x => { x.Content = serverList; });
+            }
+            catch (Exception)
+            {
+                e.GuildManager.ScoresMessage = await scoresChannel.SendMessageAsync(serverList);
+            }
+        }
+
+        private async void CsServerUnpauseAsync(object sender, UnpauseMessageEventArgs e)
+        {
+            var notification = await GetChannelAsync(e.Guild, ChannelNames.Notifications) as ISocketMessageChannel;
+
+            await notification.SendMessageAsync($"[{e.ServerId}] {MentionUtils.MentionRole((await GetRoleAsync(e.Guild, RoleNames.Broadcast) as IRole).Id)} Match has unpaused - {e.TimeStamp.ToString("HH:mm:ss")}");
+        }
+
+        private async void CsServerSwapSidesAsync(object sender, MatchSwapSidesEventArgs e)
+        {
+            var notification = await GetChannelAsync(e.Guild, ChannelNames.Notifications) as ISocketMessageChannel;
+
+            await notification.SendMessageAsync($"[{e.ServerId}] {MentionUtils.MentionRole((await GetRoleAsync(e.Guild, RoleNames.Broadcast) as IRole).Id)} Teams have swapped sides {e.CTName} ({e.CTScore}) - {e.TName} ({e.TScore}) - {e.TimeStamp.ToString("HH:mm:ss")}");
+        }
+
+        private async void CsServerTechPauseAsync(object sender, TechMessageEventArgs e)
+        {
+            var notification = await GetChannelAsync(e.Guild, ChannelNames.Notifications) as ISocketMessageChannel;
+
+            await notification.SendMessageAsync($"[{e.ServerId}] {MentionUtils.MentionRole((await GetRoleAsync(e.Guild, RoleNames.Broadcast) as IRole).Id)} Technical pause ({e.PausingTeam}) Scores: {e.CTName} ({e.CTScore}) {e.TName} ({e.TScore}) - {e.TimeStamp.ToString("HH:mm:ss")}");
+        }
+
+        private async void CsServerTacPauseAsync(object sender, TacMessageEventArgs e)
+        {
+            var notification = await GetChannelAsync(e.Guild, ChannelNames.Notifications) as ISocketMessageChannel;
+
+            await notification.SendMessageAsync($"[{e.ServerId}] {MentionUtils.MentionRole((await GetRoleAsync(e.Guild, RoleNames.Broadcast) as IRole).Id)} Tactical pause ({e.PausingTeam}) Scores: {e.CTName} ({e.CTScore}) {e.TName} ({e.TScore}) - {e.TimeStamp.ToString("HH:mm:ss")}");
+        }
+
+        private async void CsServerMatchLiveAsync(object sender, MatchStartEventArgs e)
+        {
+            var notification = await GetChannelAsync(e.Guild, ChannelNames.Notifications) as ISocketMessageChannel;
+
+            await notification.SendMessageAsync($"[{e.ServerId}] {MentionUtils.MentionRole((await GetRoleAsync(e.Guild, RoleNames.Broadcast) as IRole).Id)} Match is now live on {e.MapName} - {e.TimeStamp.ToString("HH:mm:ss")}");
+        }
+
+        private async void CsServerChatMessageAsync(object sender, ChatMessageEventArgs e)
+        {
+            var chatChannel = await GetChannelAsync(e.Guild, ChannelNames.Chat) as ISocketMessageChannel;
+
+            await chatChannel.SendMessageAsync($"[{e.ServerId}] {e.TimeStamp.ToString("HH:mm:ss")}: {e.ChatMessage.Player.Name} => ({e.ChatMessage.Channel}) {e.ChatMessage.Message}");
+        }
+
+        #endregion Match Messages
+
         internal async Task AddNewGuildAsync(SocketGuild guild)
         {
             try
             {
                 if (GuildManagers.FirstOrDefault(x => x.Guild.Id == guild.Id) == null)
                 {
-                    await GetAdminRoleAsync(guild);
+                    await GetRoleAsync(guild, RoleNames.Admin);
 
-                    await GetViewerRoleAsync(guild);
+                    await GetRoleAsync(guild, RoleNames.Broadcast);
 
                     GuildManagers.Add(new GuildManager(guild));
                 }
@@ -162,31 +372,39 @@ namespace DiscordGo.Classes
 
         internal async Task MessageReceivedAsync(SocketMessage message)
         {
-            var channel = message.Channel as SocketGuildChannel;
-
-            var arguments = message.Content.Substring(1).Split(' ');
-
-            var commandRequest = new CommandRequest()
+            try
             {
-                Guild = channel.Guild,
-                Message = message,
-                Arguments = arguments,
-                ReturnString = string.Empty,
-                NeedHelp = (arguments.Length > 1 && arguments[1] == CommandConstants.Help) ? true : false
-            };
+                var channel = message.Channel as SocketGuildChannel;
 
-            if (Commands.ContainsKey(arguments[0]))
-            {
-                Commands[arguments[0]](commandRequest);
+                var arguments = message.Content.Substring(1).Split(' ');
 
-                Console.WriteLine(commandRequest.ReturnString);
+                var commandRequest = new CommandRequest()
+                {
+                    Guild = channel.Guild,
+                    Message = message,
+                    Arguments = arguments,
+                    ReturnString = string.Empty,
+                    NeedHelp = (arguments.Length > 1 && arguments[1] == CommandConstants.Help) ? true : false
+                };
+
+                if (Commands.ContainsKey(arguments[0]))
+                {
+                    Commands[arguments[0]](commandRequest);
+
+                    Console.WriteLine(commandRequest.ReturnString);
+                }
+                else
+                {
+                    await message.Channel.SendMessageAsync($"{message.Author.Mention} that is not a valid command. Use {Config.Prefix}{CommandConstants.Help} to get a full list of available commands");
+                }
+
+                return;
             }
-            else
+            catch (Exception e)
             {
-                await message.Channel.SendMessageAsync($"{message.Author.Mention} that is not a valid command. Use {Prefix}{CommandConstants.Help} to get a full list of available commands");
+                Console.WriteLine($"EXCEPTION: {e}");
+                return;
             }
-
-            return;
         }
 
         #region Helpers
@@ -204,7 +422,7 @@ namespace DiscordGo.Classes
         {
             if (commandRequest.Guild.Channels.FirstOrDefault(x => x.Name == ChannelNames.Admin) == null)
             {
-                var adminRole = await GetAdminRoleAsync(commandRequest.Guild) as IRole;
+                var adminRole = await GetRoleAsync(commandRequest.Guild, RoleNames.Admin) as IRole;
 
                 var everyoneRole = GetEveryoneRole(commandRequest.Guild) as IRole;
 
@@ -221,42 +439,6 @@ namespace DiscordGo.Classes
         }
 
         #endregion Validators
-
-        #region Admin Role
-
-        public async Task<SocketRole> GetAdminRoleAsync(SocketGuild guild)
-        {
-            var adminRole = guild.Roles.FirstOrDefault(x => x.Name == "DiscordGo");
-
-            return adminRole ?? await GenerateAdminRoleAsync(guild);
-        }
-
-        private async Task<SocketRole> GenerateAdminRoleAsync(SocketGuild guild)
-        {
-            var adminRole = await guild.CreateRoleAsync("DiscordGo", color: Color.Teal);
-
-            return guild.Roles.FirstOrDefault(x => x.Name == "DiscordGo");
-        }
-
-        #endregion Admin Role
-
-        #region Viewer Role
-
-        private async Task<SocketRole> GetViewerRoleAsync(SocketGuild guild)
-        {
-            var viewerRole = guild.Roles.FirstOrDefault(x => x.Name == "DiscordGoViewer");
-
-            return viewerRole ?? await GenerateViewerRoleAsync(guild);
-        }
-
-        private async Task<SocketRole> GenerateViewerRoleAsync(SocketGuild guild)
-        {
-            var vierwerRole = await guild.CreateRoleAsync("DiscordGoViewer", color: Color.DarkTeal);
-
-            return guild.Roles.FirstOrDefault(x => x.Name == "DiscordViewer");
-        }
-
-        #endregion Viewer Role
 
         #region Everyone Role
 
@@ -285,24 +467,42 @@ namespace DiscordGo.Classes
 
         #endregion Base Category
 
-        #region Admin Channel
+        #region Get Role
 
-        private async Task<SocketChannel> GetAdminChannelAsync(SocketGuild guild)
+        public async Task<SocketRole> GetRoleAsync(SocketGuild guild, string roleName)
         {
-            var adminChannel = guild.TextChannels.FirstOrDefault(x => x.Name == ChannelNames.Admin);
+            var adminRole = guild.Roles.FirstOrDefault(x => x.Name == roleName);
 
-            return adminChannel ?? await GenerateAdminChannelAsync(guild);
+            return adminRole ?? await GenerateRoleAsync(guild, roleName);
         }
 
-        private async Task<SocketChannel> GenerateAdminChannelAsync(SocketGuild guild)
+        private async Task<SocketRole> GenerateRoleAsync(SocketGuild guild, string roleName)
+        {
+            await guild.CreateRoleAsync(roleName, color: Color.Teal);
+
+            return await GetRoleAsync(guild, roleName);
+        }
+
+        #endregion Get Role
+
+        #region Get Channel
+
+        private async Task<SocketChannel> GetChannelAsync(SocketGuild guild, string channelName)
+        {
+            var channel = guild.TextChannels.FirstOrDefault(x => x.Name == channelName);
+
+            return channel ?? await GenerateChannelAsync(guild, channelName);
+        }
+
+        private async Task<SocketChannel> GenerateChannelAsync(SocketGuild guild, string channelName)
         {
             var category = await GetBaseCategoryAsync(guild);
-            var adminChannel = await guild.CreateTextChannelAsync(ChannelNames.Admin, func: x => { x.CategoryId = category.Id; });
+            var adminChannel = await guild.CreateTextChannelAsync(channelName, func: x => { x.CategoryId = category.Id; });
 
-            return await GetAdminChannelAsync(guild);
+            return await GetChannelAsync(guild, channelName);
         }
 
-        #endregion Admin Channel
+        #endregion Get Channel
 
         #endregion Helpers
     }

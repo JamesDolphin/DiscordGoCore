@@ -1,6 +1,319 @@
-﻿namespace DiscordGo.Classes
+﻿using CoreRCON;
+using CoreRCON.Parsers.Standard;
+using DiscordGo.Classes.Events;
+using DiscordGo.Parsers;
+
+using DiscordGo.Utils;
+using System;
+using System.Net;
+using System.Threading.Tasks;
+
+namespace DiscordGo.Classes
 {
     public class CsServer
     {
+        private string IP { get; set; }
+        private ushort Port { get; set; }
+        public string IpAddress { get { return $"{IP}:{Port}"; } }
+        private string RconPassword { get; set; }
+
+        public bool Authed { get; set; }
+
+        private ushort LogPort { get; set; }
+        private LogReceiver LogReceiver { get; set; }
+
+        private Config Config { get; set; }
+
+        private RCON Rcon { get; set; }
+
+        public event EventHandler<ChatMessageEventArgs> ChatMessageEventArgs;
+
+        public event EventHandler<MatchStartEventArgs> MatchStartEventArgs;
+
+        public event EventHandler<TechMessageEventArgs> TechMessageEventArgs;
+
+        public event EventHandler<TacMessageEventArgs> TacMessageEventArgs;
+
+        public event EventHandler<MatchSwapSidesEventArgs> MatchSwapSidesEventArgs;
+
+        public event EventHandler<UnpauseMessageEventArgs> UnpauseMessageEventArgs;
+
+        public event EventHandler<ScoreUpdateEventsArgs> ScoreUpdateEventsArgs;
+
+        public CsMatch Match { get; set; } = new CsMatch();
+
+        public GuildManager Manager { get; set; }
+
+        public int ID { get; set; }
+
+        public CsServer(string ip, ushort port, string rconPassword, Config config, GuildManager guild, int id)
+        {
+            try
+            {
+                IP = ip;
+                Port = port;
+                RconPassword = rconPassword;
+                Config = config;
+                LogPort = Convert.ToUInt16(config.LogPort);
+                Manager = guild;
+                ID = id;
+
+                LogReceiver = new LogReceiver(LogPort, new IPEndPoint(IPAddress.Parse(IP), Port));
+
+                StartListeners(LogReceiver);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"EXCEPTION: {e}");
+            }
+        }
+
+        private void StartListeners(LogReceiver logReceiver)
+        {
+            logReceiver.Listen<ChatMessage>(chat =>
+            {
+                ProcessChatMessage(chat);
+            });
+
+            logReceiver.Listen<RoundEndScores>(roundEndScore =>
+            {
+                Match.CTScore = roundEndScore.CTScore;
+                Match.TScore = roundEndScore.TScore;
+
+                if (Match.ShouldSwapSides())
+                {
+                    Match.SwapSides();
+
+                    ProcessSwapSides();
+                }
+
+                ProcessScoreUpdate();
+            });
+
+            logReceiver.Listen<KillFeed>(e =>
+            {
+            });
+
+            logReceiver.Listen<MatchLive>(live =>
+            {
+                Match.MapName = live.MapName;
+
+                if (!Match.IsLive)
+                {
+                    Match.IsLive = true;
+
+                    ProcessMatchStarting(Match);
+                }
+            });
+
+            logReceiver.Listen<CTTeamName>(ctSide =>
+            {
+                Match.CTName = ctSide.CTName;
+            });
+
+            logReceiver.Listen<TTeamName>(tSide =>
+            {
+                Match.TName = tSide.TName;
+            });
+
+            logReceiver.Listen<StartFreezeTime>(startfreezeTime =>
+            {
+                Match.IsFreezeTime = true;
+            });
+
+            logReceiver.Listen<EndFreezeTime>(endFreezeTime =>
+            {
+                Match.IsFreezeTime = false;
+                Match.Paused = false;
+            });
+
+            logReceiver.Listen<NewPlayer>(async playerJoined =>
+            {
+                var response = await Rcon.SendCommandAsync("status");
+
+                Console.WriteLine(response);
+            });
+        }
+
+        #region Log Processors
+
+        private void ProcessScoreUpdate()
+        {
+            ScoreUpdateEventsArgs scoreUpdateArgs = new ScoreUpdateEventsArgs
+            {
+                Match = Match,
+                GuildManager = Manager,
+                TimeStamp = DateTime.UtcNow.AddHours(Config.TimeZoneOffset),
+            };
+
+            OnScoreUpdate(scoreUpdateArgs);
+        }
+
+        private void ProcessSwapSides()
+        {
+            if (Match.IsLive)
+            {
+                MatchSwapSidesEventArgs swapSidesEventArgs = new MatchSwapSidesEventArgs
+                {
+                    Guild = Manager.Guild,
+                    TName = Match.TName,
+                    CTName = Match.CTName,
+                    TScore = Match.TScore,
+                    CTScore = Match.CTScore,
+                    TimeStamp = DateTime.UtcNow.AddHours(Config.TimeZoneOffset),
+                    ServerId = ID
+                };
+
+                OnSwapSides(swapSidesEventArgs);
+            }
+        }
+
+        private void ProcessMatchStarting(CsMatch match)
+        {
+            MatchStartEventArgs args = new MatchStartEventArgs
+            {
+                MapName = match.MapName,
+                CTName = match.CTName,
+                Guild = Manager.Guild,
+                TName = match.TName,
+                ServerId = ID,
+
+                TimeStamp = DateTime.UtcNow.AddHours(Config.TimeZoneOffset),
+            };
+
+            OnMatchLive(args);
+        }
+
+        private void ProcessChatMessage(ChatMessage chat)
+        {
+            var timeStamp = DateTime.UtcNow.AddHours(Config.TimeZoneOffset);
+
+            if (Match.IsFreezeTime && Match.IsLive)
+            {
+                if (chat.Message.ToLower() == ".tac")
+                {
+                    Match.Paused = true;
+
+                    TacMessageEventArgs tacArgs = new TacMessageEventArgs
+                    {
+                        Guild = Manager.Guild,
+                        CTScore = Match.CTScore,
+                        TScore = Match.TScore,
+                        TimeStamp = timeStamp,
+                        CTName = Match.CTName,
+                        TName = Match.TName,
+                        PausingTeam = chat.Player.Team == "CT" ? Match.CTName : Match.TName,
+                        ServerId = ID
+                    };
+
+                    OnTacPause(tacArgs);
+                }
+                else if (chat.Message.ToLower() == ".tech")
+                {
+                    Match.Paused = true;
+
+                    TechMessageEventArgs techArgs = new TechMessageEventArgs
+                    {
+                        Guild = Manager.Guild,
+                        CTScore = Match.CTScore,
+                        TScore = Match.TScore,
+                        TimeStamp = timeStamp,
+                        CTName = Match.CTName,
+                        TName = Match.TName,
+                        PausingTeam = chat.Player.Team == "CT" ? Match.CTName : Match.TName,
+                        ServerId = ID
+                    };
+
+                    OnTechPause(techArgs);
+                }
+                else if (chat.Message.ToLower() == ".unpause")
+                {
+                    Match.Paused = false;
+                    UnpauseMessageEventArgs unpauseMessageArgs = new UnpauseMessageEventArgs
+                    {
+                        Guild = Manager.Guild,
+
+                        TimeStamp = timeStamp,
+
+                        ServerId = ID
+                    };
+
+                    OnUnpause(unpauseMessageArgs);
+                }
+            }
+
+            ChatMessageEventArgs chatArgs = new ChatMessageEventArgs
+            {
+                ChatMessage = chat,
+                TimeStamp = timeStamp,
+                Guild = Manager.Guild,
+                ServerId = ID
+            };
+
+            OnChatMessage(chatArgs);
+        }
+
+        #endregion Log Processors
+
+        #region Event Emitters
+
+        private void OnScoreUpdate(ScoreUpdateEventsArgs scoreUpdateArgs)
+        {
+            ScoreUpdateEventsArgs?.Invoke(this, scoreUpdateArgs);
+        }
+
+        private void OnUnpause(UnpauseMessageEventArgs unpauseMessageArgs)
+        {
+            UnpauseMessageEventArgs?.Invoke(this, unpauseMessageArgs);
+        }
+
+        private void OnSwapSides(MatchSwapSidesEventArgs swapSidesEventArgs)
+        {
+            MatchSwapSidesEventArgs?.Invoke(this, swapSidesEventArgs);
+        }
+
+        private void OnMatchLive(MatchStartEventArgs e)
+        {
+            MatchStartEventArgs?.Invoke(this, e);
+        }
+
+        private void OnTechPause(TechMessageEventArgs techArgs)
+        {
+            TechMessageEventArgs?.Invoke(this, techArgs);
+        }
+
+        private void OnTacPause(TacMessageEventArgs tacArgs)
+        {
+            TacMessageEventArgs?.Invoke(this, tacArgs);
+        }
+
+        private void OnChatMessage(ChatMessageEventArgs chatArgs)
+        {
+            ChatMessageEventArgs?.Invoke(this, chatArgs);
+        }
+
+        #endregion Event Emitters
+
+        public async Task InitializeRconAsync()
+        {
+            try
+            {
+                Rcon = new RCON(IPAddress.Parse(IP), Port, RconPassword);
+
+                await Rcon.ConnectAsync();
+
+                await Rcon.SendCommandAsync("say DiscordGo connected.");
+                await Rcon.SendCommandAsync($"logaddress_add {Helpers.GetPublicIPAddress()}:{Config.LogPort}");
+
+                Authed = true;
+                return;
+            }
+            catch (Exception e)
+            {
+                Authed = false;
+                Console.WriteLine($"EXCEPTION: {e}");
+                return;
+            }
+        }
     }
 }

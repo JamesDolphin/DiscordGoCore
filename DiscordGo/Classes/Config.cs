@@ -7,5 +7,7 @@
         public int LogPort { get; set; }
 
         public char Prefix { get; set; }
+
+        public int TimeZoneOffset { get; set; }
     }
 }
