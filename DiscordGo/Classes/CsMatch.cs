@@ -26,6 +26,12 @@ namespace DiscordGo.Classes
         public int TSeriesScore { get; set; }
         public bool IsOT { get; internal set; }
         public bool Paused { get; internal set; }
+        public int ReadyCount { get; internal set; }
+        public int PlayerCount { get; internal set; }
+
+        public int TSwapScore { get; set; }
+
+        public int CtSwapScore { get; set; }
 
         public CsMatch()
         {
@@ -33,7 +39,9 @@ namespace DiscordGo.Classes
 
         internal void SwapSides()
         {
-            (TScore, CTScore) = (CTScore, TScore);
+            CtSwapScore = TScore;
+
+            TSwapScore = CTScore;
 
             (TName, CTName) = (CTName, TName);
 
@@ -69,6 +77,17 @@ namespace DiscordGo.Classes
                 }
             }
             return false;
+        }
+
+        internal void EndMatch()
+        {
+            CTScore = 0;
+            TScore = 0;
+            SwapCount = 0;
+            CTSeriesScore = 0;
+            TSeriesScore = 0;
+            SeriesMaxScore = 0;
+            IsLive = false;
         }
     }
 }

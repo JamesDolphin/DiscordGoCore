@@ -40,6 +40,10 @@ namespace DiscordGo.Classes
 
         public event EventHandler<ScoreUpdateEventsArgs> ScoreUpdateEventsArgs;
 
+        public event EventHandler<OnGenericUpdateEventArgs> OnGenericUpdateEventArgs;
+
+        public event EventHandler<MatchEndEventArgs> MatchEndEventArgs;
+
         public CsMatch Match { get; set; } = new CsMatch();
 
         public GuildManager Manager { get; set; }
@@ -77,8 +81,8 @@ namespace DiscordGo.Classes
 
             logReceiver.Listen<RoundEndScores>(roundEndScore =>
             {
-                Match.CTScore = roundEndScore.CTScore;
-                Match.TScore = roundEndScore.TScore;
+                Match.CTScore = roundEndScore.CTScore + Match.CtSwapScore;
+                Match.TScore = roundEndScore.TScore + Match.TSwapScore;
 
                 if (Match.ShouldSwapSides())
                 {
@@ -89,6 +93,8 @@ namespace DiscordGo.Classes
 
                 ProcessScoreUpdate();
             });
+
+            logReceiver.ListenRaw(result => { ProcessRaw(result); });
 
             logReceiver.Listen<KillFeed>(e =>
             {
@@ -123,22 +129,119 @@ namespace DiscordGo.Classes
 
             logReceiver.Listen<EndFreezeTime>(endFreezeTime =>
             {
+                if (Match.Paused == true)
+                {
+                    ProcessUnpauseMatch();
+                }
                 Match.IsFreezeTime = false;
                 Match.Paused = false;
             });
 
-            logReceiver.Listen<NewPlayer>(async playerJoined =>
-            {
-                var response = await Rcon.SendCommandAsync("status");
+            //logReceiver.Listen<NewPlayer>(async playerJoined =>
+            //{
+            //    ServerStatus status = await Rcon.SendCommandAsync<ServerStatus>("status");
+            //});
 
-                Console.WriteLine(response);
+            logReceiver.Listen<MatchEnd>(matchEnd =>
+            {
+                Console.WriteLine(matchEnd.MatchId);
+
+                ProcessMatchEnd(matchEnd.MatchId);
+
+                Match.EndMatch();
             });
+        }
+
+        private void ProcessMatchEnd(int matchId)
+        {
+            MatchEndEventArgs args = new MatchEndEventArgs
+            {
+                Guild = Manager.Guild,
+                TName = Match.TName,
+                CTName = Match.CTName,
+                TScore = Match.TScore,
+                CTScore = Match.CTScore,
+                TimeStamp = DateTime.UtcNow.AddHours(Config.TimeZoneOffset),
+                MatchId = matchId
+            };
+
+            OnMatchEnd(args);
+        }
+
+        private void ProcessUnpauseMatch()
+        {
+            OnGenericUpdateEventArgs args = new OnGenericUpdateEventArgs
+            {
+                Message = $"{Match.CTName} vs {Match.TName} is live again",
+                Guild = Manager.Guild,
+                TimeStamp = DateTime.UtcNow.AddHours(Config.TimeZoneOffset),
+                ServerId = ID
+            };
+
+            OnGenericUpdate(args);
+        }
+
+        private void ProcessRaw(string result)
+        {
+            if (Match.IsLive)
+            {
+                if (result.Contains(".ready") || result.Contains(".READY") || result.Contains(".gaben") || result.Contains(".GABEN"))
+                {
+                    Match.ReadyCount++;
+                }
+            }
+
+            if (result.Contains("Log file started"))
+            {
+                if (Match.ReadyCount > 8)
+                {
+                    if (Match.SwapCount > 0)
+                    {
+                        if (Match.SwapCount == 1)
+                        {
+                            OnGenericUpdateEventArgs args = new OnGenericUpdateEventArgs
+                            {
+                                Message = $"{Match.CTName} vs {Match.TName} is now live in the second half",
+                                Guild = Manager.Guild,
+                                TimeStamp = DateTime.UtcNow.AddHours(Config.TimeZoneOffset),
+                                ServerId = ID
+                            };
+
+                            Match.ReadyCount = 0;
+                            Match.Paused = false;
+
+                            OnGenericUpdate(args);
+                        }
+
+                        if (Match.SwapCount > 1)
+                        {
+                            OnGenericUpdateEventArgs args = new OnGenericUpdateEventArgs
+                            {
+                                Message = $"{Match.CTName} vs {Match.TName} is now live in OT {Match.SwapCount - 1}",
+                                Guild = Manager.Guild,
+                                TimeStamp = DateTime.UtcNow.AddHours(Config.TimeZoneOffset),
+                                ServerId = ID
+                            };
+
+                            OnGenericUpdate(args);
+
+                            Match.ReadyCount = 0;
+                            Match.Paused = false;
+                        }
+                    }
+                }
+            }
         }
 
         #region Log Processors
 
         private void ProcessScoreUpdate()
         {
+            if (Match.CTScore + Match.CTScore == 30)
+            {
+                //GOING OT
+            }
+
             ScoreUpdateEventsArgs scoreUpdateArgs = new ScoreUpdateEventsArgs
             {
                 Match = Match,
@@ -170,6 +273,11 @@ namespace DiscordGo.Classes
 
         private void ProcessMatchStarting(CsMatch match)
         {
+            Match.CtSwapScore = 0;
+            Match.TSwapScore = 0;
+            Match.TScore = 0;
+            Match.CTScore = 0;
+
             MatchStartEventArgs args = new MatchStartEventArgs
             {
                 MapName = match.MapName,
@@ -188,7 +296,7 @@ namespace DiscordGo.Classes
         {
             var timeStamp = DateTime.UtcNow.AddHours(Config.TimeZoneOffset);
 
-            if (Match.IsFreezeTime && Match.IsLive)
+            if (Match.IsFreezeTime && Match.IsLive && !Match.Paused)
             {
                 if (chat.Message.ToLower() == ".tac")
                 {
@@ -257,6 +365,16 @@ namespace DiscordGo.Classes
 
         #region Event Emitters
 
+        private void OnMatchEnd(MatchEndEventArgs args)
+        {
+            MatchEndEventArgs?.Invoke(this, args);
+        }
+
+        private void OnGenericUpdate(OnGenericUpdateEventArgs args)
+        {
+            OnGenericUpdateEventArgs?.Invoke(this, args);
+        }
+
         private void OnScoreUpdate(ScoreUpdateEventsArgs scoreUpdateArgs)
         {
             ScoreUpdateEventsArgs?.Invoke(this, scoreUpdateArgs);
@@ -302,8 +420,10 @@ namespace DiscordGo.Classes
 
                 await Rcon.ConnectAsync();
 
-                await Rcon.SendCommandAsync("say DiscordGo connected.");
+                //await Rcon.SendCommandAsync("say DiscordGo connected.");
                 await Rcon.SendCommandAsync($"logaddress_add {Helpers.GetPublicIPAddress()}:{Config.LogPort}");
+
+                Match.IsLive = true;
 
                 Authed = true;
                 return;
@@ -314,6 +434,13 @@ namespace DiscordGo.Classes
                 Console.WriteLine($"EXCEPTION: {e}");
                 return;
             }
+        }
+
+        internal async Task SendCommandAsync(string command)
+        {
+            await Rcon.SendCommandAsync(command);
+
+            return;
         }
     }
 }

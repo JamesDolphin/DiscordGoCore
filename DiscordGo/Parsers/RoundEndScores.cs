@@ -17,6 +17,8 @@ namespace DiscordGo.Parsers
     {
         public override string Pattern { get; } = @"Team ""(?<winning_team>.+?)"" triggered ""SFUI_Notice_.+?"" \(CT ""(?<ct_score>\d+)""\) \(T ""(?<t_score>\d+)""\)";
 
+        //Team "CT" triggered "SFUI_Notice_CTs_Win" (CT "3") (T "0")
+
         public override RoundEndScores Load(GroupCollection groups)
         {
             return new RoundEndScores
