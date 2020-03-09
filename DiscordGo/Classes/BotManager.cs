@@ -70,7 +70,7 @@ namespace DiscordGo.Classes
 
                             eb.WithFooter($"Use command \"{Config.Prefix}{CommandConstants.Help}\" to list all available commands");
 
-                            eb.Description = $"{Config.Prefix}{CommandConstants.AddServer}";
+                            eb.Description = $"{Config.Prefix}{CommandConstants.AddServer} 123.456.789.10:12345 rconPassword";
 
                             await commandRequest.Message.Channel.SendMessageAsync(string.Empty, false, eb.Build());
                         }
@@ -166,6 +166,10 @@ namespace DiscordGo.Classes
 
                                             server.ScoreUpdateEventsArgs += CsServerScoreUpdateAsycAsync;
 
+                                            server.OnGenericUpdateEventArgs += CsServerGenericBroadcastUpdateAsync;
+
+                                            server.MatchEndEventArgs += CsServerMatchEndAsync;
+
                                             guild.Servers.Add(server);
 
                                             guild.ServerId ++;
@@ -219,7 +223,7 @@ namespace DiscordGo.Classes
 
                             var fieldBuilder = new EmbedFieldBuilder
                             {
-                                Name = "Lists all servers being tracked on this server",
+                                Name = "Lists all servers being tracked on this discord server",
 
                                 Value = "field"
                             };
@@ -280,6 +284,40 @@ namespace DiscordGo.Classes
         }
 
         #region Match Messages
+
+        private async void CsServerMatchEndAsync(object sender, MatchEndEventArgs e)
+        {
+            var eb = new EmbedBuilder
+            {
+                Title = $"Match complete {e.MapName} {e.CTName}({e.CTScore}) {e.TName}({e.TScore})",
+
+                ThumbnailUrl = "https://cdn.discordapp.com/attachments/546946476836782090/546955027210829825/no_backround.png",
+
+                Color = Color.Teal
+            };
+
+            var fieldBuilder = new EmbedFieldBuilder
+            {
+                Name = $"Match Complete https://play.esea.net/match/{e.MatchId}",
+
+                Value = "field"
+            };
+
+            eb.AddField("Usage", fieldBuilder.Build());
+
+            eb.WithFooter($"Use command \"{Config.Prefix}{CommandConstants.Help}\" to list all available commands");
+
+            eb.Description = $"{Config.Prefix}{CommandConstants.ServerList}";
+
+            await (await GetChannelAsync(e.Guild, ChannelNames.MatchCard) as ISocketMessageChannel).SendMessageAsync(string.Empty, false, eb.Build());
+        }
+
+        private async void CsServerGenericBroadcastUpdateAsync(object sender, OnGenericUpdateEventArgs e)
+        {
+            var notification = await GetChannelAsync(e.Guild, ChannelNames.Notifications) as ISocketMessageChannel;
+
+            await notification.SendMessageAsync($"[{e.ServerId}] {MentionUtils.MentionRole((await GetRoleAsync(e.Guild, RoleNames.Broadcast) as IRole).Id)} {e.Message} - {e.TimeStamp.ToString("HH:mm:ss")}");
+        }
 
         private async void CsServerScoreUpdateAsycAsync(object sender, ScoreUpdateEventsArgs e)
         {
@@ -392,6 +430,25 @@ namespace DiscordGo.Classes
                     Commands[arguments[0]](commandRequest);
 
                     Console.WriteLine(commandRequest.ReturnString);
+                }
+                else if (int.TryParse(arguments[0], out int serverID) && message.Channel.Name == ChannelNames.Chat)
+                {
+                    var guildManager = GuildManagers.FirstOrDefault(x => x.Guild.Id == channel.Guild.Id);
+
+                    var server = guildManager.Servers.FirstOrDefault(x => x.ID == serverID);
+
+                    if (server != null)
+                    {
+                        var output = string.Join(" ", arguments.Skip(1));
+
+                        await server.SendCommandAsync($"say {output}");
+                    }
+                    else
+                    {
+                        await message.Channel.SendMessageAsync("That server ID could not be found");
+                    }
+
+                    await message.DeleteAsync();
                 }
                 else
                 {
