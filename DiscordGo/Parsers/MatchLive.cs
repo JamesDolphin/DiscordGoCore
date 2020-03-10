@@ -17,7 +17,7 @@ namespace DiscordGo.Parsers
 
     public class MatchLiveParser : DefaultParser<MatchLive>
     {
-        public override string Pattern { get; } = @"World triggered ""Match_Start"" on ""(?<map_name>.+)""";
+        public override string Pattern { get; } = @"""ESEA"" triggered ""ESEA_Match_Begin""";
 
         //World triggered "Match_Start" on "de_dust2"
 

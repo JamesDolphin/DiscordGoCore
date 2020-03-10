@@ -11,9 +11,9 @@ namespace DiscordGo.Classes
 
         public bool IsLive { get; set; }
 
-        public string CTName { get; set; }
+        public string CTName { get; set; } = "CT";
 
-        public string TName { get; set; }
+        public string TName { get; set; } = "T";
         public string MapName { get; set; }
         public bool IsFreezeTime { get; set; }
 
@@ -39,42 +39,26 @@ namespace DiscordGo.Classes
 
         internal void SwapSides()
         {
-            CtSwapScore = TScore;
-
-            TSwapScore = CTScore;
-
             (TName, CTName) = (CTName, TName);
 
             SwapCount++;
         }
 
-        internal bool ShouldSwapSides()
+        internal bool ShouldSwapSides(int score)
         {
             if (IsLive)
             {
-                if (TScore + CTScore >= 30)
-                {
-                    var score = 33;
+                var number = 33;
 
-                    while (score <= TScore + CTScore)
+                while (number <= score)
+                {
+                    if (number == score)
                     {
-                        if (score == TScore + CTScore)
-                        {
-                            return true;
-                        }
-
-                        score += 6;
+                        return true;
                     }
-                    return false;
+                    number += 6;
                 }
-                else if (TScore + CTScore == 15)
-                {
-                    return true;
-                }
-                else
-                {
-                    return false;
-                }
+                return false;
             }
             return false;
         }

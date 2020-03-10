@@ -289,7 +289,7 @@ namespace DiscordGo.Classes
         {
             var eb = new EmbedBuilder
             {
-                Title = $"Match complete {e.MapName} {e.CTName}({e.CTScore}) {e.TName}({e.TScore})",
+                Title = $"Match complete {e.MapName} {e.CTName}({e.CTScore})   {e.TName}({e.TScore})",
 
                 ThumbnailUrl = "https://cdn.discordapp.com/attachments/546946476836782090/546955027210829825/no_backround.png",
 
@@ -298,16 +298,14 @@ namespace DiscordGo.Classes
 
             var fieldBuilder = new EmbedFieldBuilder
             {
-                Name = $"Match Complete https://play.esea.net/match/{e.MatchId}",
+                Name = $"Match Info https://play.esea.net/match/{e.MatchId}",
 
                 Value = "field"
             };
 
-            eb.AddField("Usage", fieldBuilder.Build());
+            eb.AddField("Stats available: ", fieldBuilder.Build());
 
             eb.WithFooter($"Use command \"{Config.Prefix}{CommandConstants.Help}\" to list all available commands");
-
-            eb.Description = $"{Config.Prefix}{CommandConstants.ServerList}";
 
             await (await GetChannelAsync(e.Guild, ChannelNames.MatchCard) as ISocketMessageChannel).SendMessageAsync(string.Empty, false, eb.Build());
         }
@@ -327,7 +325,7 @@ namespace DiscordGo.Classes
 
             foreach (var server in e.GuildManager.Servers)
             {
-                serverList = $"{serverList} ID: [{server.ID}] CT: {server.Match.CTName} ({server.Match.CTScore}) vs T: {server.Match.TName} ({server.Match.TScore})\n";
+                serverList = $"{serverList} ID: [{server.ID}] {server.Match.CTName} ({server.Match.CTScore}) vs {server.Match.TName} ({server.Match.TScore})\n";
             }
 
             serverList = $"```cs\n{serverList}\n```";

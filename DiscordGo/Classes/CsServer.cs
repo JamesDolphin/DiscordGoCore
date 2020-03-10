@@ -84,10 +84,16 @@ namespace DiscordGo.Classes
                 Match.CTScore = roundEndScore.CTScore + Match.CtSwapScore;
                 Match.TScore = roundEndScore.TScore + Match.TSwapScore;
 
-                if (Match.ShouldSwapSides())
+                if (Match.CTScore + Match.TScore == 15 || ((Match.CTScore + Match.TScore) > 29 && (Match.CTScore + Match.TScore) % 3 == 0))
+                {
+                    Match.CtSwapScore = Match.TScore;
+                    Match.TScore = Match.CTScore;
+                }
+
+                if ((Match.CTScore + Match.TScore) == 15 || Match.ShouldSwapSides(Match.CTScore + Match.TScore))
                 {
                     Match.SwapSides();
-
+                    Match.Paused = true;
                     ProcessSwapSides();
                 }
 
@@ -136,11 +142,6 @@ namespace DiscordGo.Classes
                 Match.IsFreezeTime = false;
                 Match.Paused = false;
             });
-
-            //logReceiver.Listen<NewPlayer>(async playerJoined =>
-            //{
-            //    ServerStatus status = await Rcon.SendCommandAsync<ServerStatus>("status");
-            //});
 
             logReceiver.Listen<MatchEnd>(matchEnd =>
             {
@@ -239,7 +240,13 @@ namespace DiscordGo.Classes
         {
             if (Match.CTScore + Match.CTScore == 30)
             {
-                //GOING OT
+                OnGenericUpdateEventArgs args = new OnGenericUpdateEventArgs
+                {
+                    Message = $"{Match.CTName} vs {Match.TName} is going OT",
+                    Guild = Manager.Guild,
+                    TimeStamp = DateTime.UtcNow.AddHours(Config.TimeZoneOffset),
+                    ServerId = ID
+                };
             }
 
             ScoreUpdateEventsArgs scoreUpdateArgs = new ScoreUpdateEventsArgs
