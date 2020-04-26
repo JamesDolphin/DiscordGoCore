@@ -81,23 +81,26 @@ namespace DiscordGo.Classes
 
             logReceiver.Listen<RoundEndScores>(roundEndScore =>
             {
-                Match.CTScore = roundEndScore.CTScore + Match.CtSwapScore;
-                Match.TScore = roundEndScore.TScore + Match.TSwapScore;
-
-                if (Match.CTScore + Match.TScore == 15 || ((Match.CTScore + Match.TScore) > 29 && (Match.CTScore + Match.TScore) % 3 == 0))
+                if (Match.IsLive)
                 {
-                    Match.CtSwapScore = Match.TScore;
-                    Match.TScore = Match.CTScore;
-                }
+                    Match.CTScore = roundEndScore.CTScore + Match.CtSwapScore;
+                    Match.TScore = roundEndScore.TScore + Match.TSwapScore;
 
-                if ((Match.CTScore + Match.TScore) == 15 || Match.ShouldSwapSides(Match.CTScore + Match.TScore))
-                {
-                    Match.SwapSides();
-                    Match.Paused = true;
-                    ProcessSwapSides();
-                }
+                    if (Match.CTScore + Match.TScore == 15 || ((Match.CTScore + Match.TScore) > 29 && (Match.CTScore + Match.TScore) % 3 == 0))
+                    {
+                        Match.CtSwapScore = Match.TScore;
+                        Match.TSwapScore = Match.CTScore;
+                    }
 
-                ProcessScoreUpdate();
+                    if ((Match.CTScore + Match.TScore) == 15 || Match.ShouldSwapSides(Match.CTScore + Match.TScore))
+                    {
+                        Match.SwapSides();
+                        Match.Paused = true;
+                        ProcessSwapSides();
+                    }
+
+                    ProcessScoreUpdate();
+                }
             });
 
             logReceiver.ListenRaw(result => { ProcessRaw(result); });
@@ -110,12 +113,9 @@ namespace DiscordGo.Classes
             {
                 Match.MapName = live.MapName;
 
-                if (!Match.IsLive)
-                {
-                    Match.IsLive = true;
+                Match.IsLive = true;
 
-                    ProcessMatchStarting(Match);
-                }
+                ProcessMatchStarting(Match);
             });
 
             logReceiver.Listen<CTTeamName>(ctSide =>
@@ -160,8 +160,8 @@ namespace DiscordGo.Classes
                 Guild = Manager.Guild,
                 TName = Match.TName,
                 CTName = Match.CTName,
-                TScore = Match.TScore,
-                CTScore = Match.CTScore,
+                TScore = Match.TScore + Match.TSwapScore,
+                CTScore = Match.CTScore + Match.CtSwapScore,
                 TimeStamp = DateTime.UtcNow.AddHours(Config.TimeZoneOffset),
                 MatchId = matchId
             };
@@ -430,7 +430,7 @@ namespace DiscordGo.Classes
                 //await Rcon.SendCommandAsync("say DiscordGo connected.");
                 await Rcon.SendCommandAsync($"logaddress_add {Helpers.GetPublicIPAddress()}:{Config.LogPort}");
 
-                Match.IsLive = true;
+                //Match.IsLive = true;
 
                 Authed = true;
                 return;

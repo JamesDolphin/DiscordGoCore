@@ -1,7 +1,4 @@
-﻿using DiscordGo.Utils;
-using System;
-
-namespace DiscordGo.Classes
+﻿namespace DiscordGo.Classes
 {
     public class CsMatch
     {

@@ -1,13 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace DiscordGo.Parsers
+﻿namespace DiscordGo.Parsers
 {
     using CoreRCON.Parsers;
-    using System;
-    using System.Collections.Generic;
-    using System.Text;
     using System.Text.RegularExpressions;
 
     public class MatchLive : IParseable
